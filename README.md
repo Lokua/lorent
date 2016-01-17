@@ -9,6 +9,14 @@ Eventually I'd like to add the ability to pipe chosen hash directly
 into [webtorrent][https://github.com/feross/webtorrent]
 (perhaps you can help (nudge nudge)); I'm fine using copy pasta for now.
 
+## Install
+
+```bash
+npm i -g lorent
+```
+
+## Usage
+
 ```bash
 Usage: lowrent [options] [command]
 

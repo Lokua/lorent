@@ -3,6 +3,9 @@
   "version": "0.2.0",
   "description": "CLI to search for torrent data via torrentproject.se api",
   "main": "index.js",
+  "bin": {
+    "lorent": "index.js"
+  },
   "scripts": {
     "start": "node --harmony_array_includes --harmony_destructuring index",
     "test": "echo \"Error: no test specified\" && exit 1"
