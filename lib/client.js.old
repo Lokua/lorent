@@ -1,0 +1,195 @@
+// keeping around for reference
+
+/*jshint camelcase:false*/
+'use strict'
+
+const c = require('chalk')
+const request = require('request')
+const _ = require('lodash')
+const fs = require('fs')
+const prettyBytes = require('pretty-bytes')
+const torrentStream = require('torrent-stream')
+const STATUS_CODES = require('http').STATUS_CODES
+const EventEmitter = require('events')
+const vorpal = require('vorpal')()
+const ui = vorpal.ui
+
+const bus = new EventEmitter()
+const TAB = '  '
+const conf = require('../conf.json')
+const TORRENT_PROJECT = 'https://torrentproject.se'
+// torrentproject filters
+const FILTERS = require('./filters')
+
+// torrentStream instance
+let engine
+
+// search result
+let result
+
+// choice from result
+let torrentInfo
+
+
+vorpal
+  .command('list', 'list available category filters')
+  .alias('ls').alias('l')
+  .action(function(args, cb) {
+
+    this.log(c.yellow(`\n${TAB}NOTE - value before \`:\` is not actually part of the filter.\n`))
+
+    const msg = _.keys(FILTERS)
+      .map(x => {
+        if (x.includes(':')) {
+          x = x.split(':')
+          return TAB+TAB+ c.gray(x[0]+': ') + c.green(x[1])
+        }
+        return TAB+x
+      })
+      .join('\n')
+
+    this.log(c.green(msg))
+    cb()
+  })
+
+vorpal
+  .command('search <query> [filter] [outfile]',
+    'search for a torrent by title. multiple word searches must be enclosed in single quotes')
+  .alias('s')
+  .option('-f, --filter <category>', 'search within specified category defaults to `all`')
+  .option('-l, --limit <number>', 'limit search results between 1 and 20')
+  .option('-o, --outfile <path>', 'direct output as json to file rather than a list to stdout')
+  .action(function(args, cb) {
+    return new Promise((resolve, reject) => {
+      search(this, args.query, args.options).then(result => {
+        // this.delimiter(c.bold.red('choose result >'))
+        this.log('\n')
+        this.prompt({
+          name: 'choice',
+          message: c.bold.yellow('select result # or hit enter to return > ')
+        }, answer => {
+          let c = answer.choice
+          if (c) download(this, result[c]).then(resolve)
+        })
+      })
+      .catch(err => this.log(err))
+    })
+  })
+
+vorpal
+  .delimiter(c.bold.yellow('lowrent >'))
+  .show()
+
+function search(cinst, query, options, cb) {
+
+  query = encodeURIComponent(query)
+  const limit = options.limit ? +options.limit : 10
+  const filter = options.filter ? FILTERS[options.filter.toLowerCase()] : FILTERS.all
+  const apiCall = `${TORRENT_PROJECT}/?s=${query}&orderby=best&filter=${filter}&out=json`
+
+  return new Promise((resolve, reject) => {
+    request(apiCall, (err, resp, body) => {
+      if (err) throw err
+      if (resp.statusCode !== 200) {
+        cinst.log(c.red(`api call returned with ${STATUS_CODES[resp.statusCode]}`))
+        process.exit(1)
+      }
+
+      result = JSON.parse(body, null, 2)
+
+      if (options.outfile) {
+
+        fs.writeFile(options.outfile, JSON.stringify(result), err => {
+          if (err) throw err
+          cinst.log(c.green('Done! File written to ') + c.yellow(options.outfile))
+          resolve(result)
+        })
+
+      } else {
+        cinst.log(`\ntotal found: ${c.green(result.total_found)}`)
+        _.each(result, (value, key) => {
+          if (key !== 'total_found' && +key <= limit) {
+            cinst.log(`\n--- #${key}`)
+            _.each(value, (v, k) => {
+              if (k === 'torrent_size') v = prettyBytes(v)
+              cinst.log(`${lpad(k, 'torrent_hash')}: ${c.green(v)}`)
+            })
+          }
+        })
+        resolve(result)
+      }
+    })
+  })
+}
+
+
+function download(commandInstance, torrentInfo) {
+  return new Promise((resolve, reject) => {
+
+    const initialDest = `${conf.TMP_DIR}/${torrentInfo.title}`
+    const finalDest = `${conf.FIN_DIR}/${torrentInfo.title}`
+
+    engine = torrentStream(`magnet:?xt=urn:btih:${torrentInfo.torrent_hash}`, {
+      connections: 100,
+      uploads: 10,
+      tmp: initialDest,
+      path: finalDest,
+      verify: true,
+      dht: true,
+      tracker: true,
+    })
+
+    commandInstance.log('\n\tgathering file info...\n')
+
+    // when does this happen?
+    engine.on('torrent', () => {
+      commandInstance.log('on-torrent:', arguments)
+    })
+
+    engine.on('ready', () => {
+      const len = engine.files.length
+      commandInstance.prompt({
+        type: 'checkbox',
+        name: 'selectedFiles',
+        message: c.bold.yellow('choose what file(s) to include'),
+        choices: () => engine.files.map((f, i) => ({ name: f.name, value: i }))
+      }, answers => {
+        start(answers.selectedFiles)
+      })
+    })
+
+    function start(selectedFiles) {
+      engine.files.forEach((f, i) => selectedFiles.includes(i) ? f.createReadStream() : null)
+      let ul = ''
+      let dl = ''
+      engine
+        .on('upload', piece => {
+          ul = piece
+          ui.redraw(`download: ${dl}\nupload: ${ul}`)
+        })
+        .on('download', index => {
+          const progress = engine.swarm.downloaded
+          const total = torrentInfo.torrent_size
+          const percent = Math.round((progress/total)*100)
+          dl = `${percent}% ( ${prettyBytes(progress)} / ${prettyBytes(total)} ) [index:${index}]`
+          ui.redraw(`download: ${dl}\nupload: ${ul}`)
+        })
+        .on('idle', () => {
+          ui.redraw.done()
+          engine.destroy()
+          commandInstance.log(`Done. Downloaded files located at ${c.green(finalDest)}`)
+          resolve()
+        })
+    }
+  })
+}
+
+function lpad(value, max) {
+  const count = String(max).length - String(value).length
+  const zeros = ' '.repeat(parseInt(count, 10))
+  return zeros+value
+}
+
+function ltrim(str) {
+  return str.split('\n').map(s => s.replace(/$\t*/, '')).join('\n')
+}
