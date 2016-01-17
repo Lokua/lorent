@@ -6,18 +6,18 @@
 Require Node.js >= 4
 
 Eventually I'd like to add the ability to pipe chosen hash directly
-into [webtorrent][https://github.com/feross/webtorrent]
+into [webtorrent](https://github.com/feross/webtorrent)
 (perhaps you can help (nudge nudge)); I'm fine using copy pasta for now.
 
 ## Install
 
-```bash
+```
 npm i -g lorent
 ```
 
 ## Usage
 
-```bash
+```
 Usage: lowrent [options] [command]
 
 
@@ -34,13 +34,13 @@ Options:
 
 ## Example
 
-```bash
+```
 lowrent s -f hdrip "Star Wars"
 ```
 
 Returns something like:
 
-```bash
+```
 total found: 13429
 
 [1]
@@ -72,7 +72,7 @@ torrent_hash: fe1e1069de410fb44157f02b4f6655dde99621c6
 
 ## Filters
 
-```bash
+```
 audio
   lossless
   mp3
@@ -99,5 +99,4 @@ adult
 all
 ```
 
-
-[torrentproject]: https://torrentproject.se
+## License [MIT](https://raw.githubusercontent.com/Lokua/lorent/master/LICENSE)
